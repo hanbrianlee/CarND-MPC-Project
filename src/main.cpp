@@ -67,6 +67,8 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
+auto nowtime = std::chrono::high_resolution_clock::now();
+
 int main() {
   uWS::Hub h;
 
@@ -78,6 +80,12 @@ int main() {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
+
+    //processing time measurement
+    auto begin = std::chrono::high_resolution_clock::now();
+    cout << "h nowtime: " << std::chrono::duration_cast<std::chrono::milliseconds>(begin - nowtime).count() << "ms" << endl;
+    nowtime = begin;
+
     string sdata = string(data).substr(0, length);
     //cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
@@ -96,6 +104,8 @@ int main() {
           double delta = j[1]["steering_angle"];
           double a = j[1]["throttle"];
 
+          //cout << "psi: " << psi << ", py: " << py << std::endl;
+
           /*
           * TODO: Calculate steering angle and throttle using MPC.
           *
@@ -105,15 +115,29 @@ int main() {
 
           // Need Eigen vectors for polyfit
           Eigen::VectorXd xwaypoints(ptsx.size());
-          Eigen::VectorXd ywaypoints(ptsy.size());
+          Eigen::VectorXd ywaypoints(ptsx.size());
 
-          // Transform the points to the vehicle's perspective
-          for (unsigned int i = 0; i < ptsx.size(); i++) { //for every ptsx and ptxy received:
-            double dx_car_perspective = ptsx[i] - px;
-            double dy_car_perspective = ptsy[i] - py;
-            xwaypoints[i] = dx_car_perspective * cos(-psi) - dy_car_perspective * sin(-psi);
-            ywaypoints[i] = dx_car_perspective * sin(-psi) + dy_car_perspective * cos(-psi);
+          // create rotation matrix
+          Eigen::Matrix2d M_rot;
+          M_rot << cos(psi), sin(psi),
+                   -sin(psi), cos(psi);
+          for (int i = 0; i < ptsx.size(); i++)
+          {
+            Eigen::Vector2d p_waypoint(ptsx[i] - px, ptsy[i] - py); // translate
+            Eigen::Vector2d p_waypoint_t = M_rot * p_waypoint; // rotate
+            xwaypoints[i] = p_waypoint_t(0);
+            ywaypoints[i] = p_waypoint_t(1);
           }
+
+          // Transform the points to the vehicle's perspective. It's possible to smooth out driving by making the polyfit on the waypoints smoother.
+//          for (unsigned int i = 0; i < ptsx.size(); i++) { //for every ptsx and ptxy received:
+//            double dx_car_perspective = ptsx[i] - px;
+//            double dy_car_perspective = ptsy[i] - py;
+//            //because the waypoints provided by lake_track_waypoints.csv are fixed regardless of the heading angle of the
+//            //vehicle is, it's necessary to take into account the heading angle (absolute angle from the map coordinates) when calculating the waypoints.
+//            xwaypoints[i] = dx_car_perspective * cos(-psi) - dy_car_perspective * sin(-psi);
+//            ywaypoints[i] = dx_car_perspective * sin(-psi) + dy_car_perspective * cos(-psi);
+//          }
 
           // Fits a polynomial to the above x and y coordinates in car perspective to the desired order
 //          auto coeffs = polyfit(xwaypoints, ywaypoints, 1); //use first order
@@ -121,30 +145,31 @@ int main() {
           auto coeffs = polyfit(xwaypoints, ywaypoints, 3); //use third order
 
           //find out the initial cte for this MPC control instance  (every time step, the initial state will be as if the car is at 0,0 position with 0 degree angle, and is trying to figure out where to go)
-          double cte = polyeval(coeffs, 0);
+          double cte = polyeval(coeffs, 0); //evaluated at the current vehicle's position which is at x = 0
 
           //figure out the initial epsi (error in angle) for this MPC control instance (every time step, the initial state will be as if the car is at 0,0 position with 0 degree angle, and is trying to figure out where to go)
-          double epsi = -atan(coeffs[1]);
+          double epsi = -atan(coeffs[1]); //0 degree (basically the direction where the car is facing at the moment. x axis is in the direction of vehicle's forward movement, and y axis is on the left side. basically cartesian coordinate rotated 90 degrees counter-clockwise
 
 
           //define the initial state for the MPC instance (every time step, the initial state will be as if the car is at 0,0 position with 0 degree angle, and is trying to figure out where to go)
           Eigen::VectorXd state(6);
-          //state << 0, 0, 0, v, cte, epsi; //just dumb simple initialization of state
+          state << 0, 0, 0, v, cte, epsi; //just dumb simple initialization of state
 
-          //takes into account 1 dt cycle of processing latency
-          double pred_px = 0.0 + v*cos(0)*dt;
-          const double pred_py = 0.0 + v*sin(0)*dt;
-          double pred_psi = 0.0 + v * -delta / Lf * dt;
-          double pred_v = v + a * dt;
-          double pred_cte = cte + v * sin(epsi) * dt;
-          double pred_epsi = epsi + v * -delta / Lf * dt;
-          state << pred_px, pred_py, pred_psi, pred_v, pred_cte, pred_epsi;
+          //take into account 1 cycle of processing latency(approx 15~40ms) and data transfer delay(100ms)
+          //h message update rate is very fast (3~4ms) so will be ignored
+//          double pred_px = 0.0 + v*cos(0)*dt;
+//          const double pred_py = 0.0 + v*sin(0)*dt;
+//          double pred_psi = 0.0 + ((v / Lf) * -delta * dt); //apply negative to delta, see comments for steer_value below
+//          double pred_v = v + a * dt;
+//          double pred_cte = cte + v * sin(epsi) * dt;
+//          double pred_epsi = epsi + ((v / Lf) * -delta * dt); //apply negative to delta, see comments for steer_value below
+//          state << pred_px, pred_py, pred_psi, pred_v, pred_cte, pred_epsi;
 
           //solve using MPC class solve method
           auto vars = mpc.Solve(state,coeffs);
 
-          //assign the 6th and 7th element of the MPC vector which correspond to delta and a
-          double steer_value = vars[0]  / (deg2rad(25) * Lf);
+          //vars[0] and vars[1] are returned by mpc.solve function with delta and a values. Assign them accordingly.
+          double steer_value = vars[0]  / (deg2rad(25));
           double throttle_value = vars[1];
 
           json msgJson;
@@ -179,11 +204,23 @@ int main() {
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
-          const unsigned int polysize = 2.5;
+//          const unsigned int polysize = 2.5;
 
-          for (unsigned int i = 1; i < N*polysize; i++) {
-            next_x_vals.push_back(i*polysize);
-            next_y_vals.push_back(polyeval(coeffs, i*polysize));
+//          for (unsigned int i = 1; i < N*polysize; i++) {
+//            next_x_vals.push_back(i*polysize);
+//            next_y_vals.push_back(polyeval(coeffs, i*polysize));
+//          }
+
+          for (unsigned int i = 0; i < xwaypoints.size(); i++) {
+            next_x_vals.push_back(xwaypoints[i]);
+            //next_y_vals.push_back(ywaypoints[i]);
+            next_y_vals.push_back(polyeval(coeffs, xwaypoints[i]));
+            //increase resolution by twice for smoother display of the waypoint line
+            if(i != (xwaypoints.size() - 1)) //prevent addressing overflow index
+            {
+              next_x_vals.push_back((xwaypoints[i] + xwaypoints[i+1])/2); //midpoint between waypoints
+              next_y_vals.push_back(polyeval(coeffs, (xwaypoints[i] + xwaypoints[i+1])/2)); //midpoint between waypoints
+            }
           }
 
           msgJson["next_x"] = next_x_vals;
@@ -192,7 +229,7 @@ int main() {
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           //std::cout << msg << std::endl;
-          std::cout << "steering angle: " << delta << std::endl;
+          //std::cout << "delta: " << delta << ", cte: " << cte <<", epsi: " << epsi <<", a: " << a << ", steer: " << steer_value << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
@@ -202,8 +239,11 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          this_thread::sleep_for(chrono::milliseconds(100));
-          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+          auto end = std::chrono::high_resolution_clock::now();
+          std::cout << "processing time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << "ms" << std::endl;
+
+          this_thread::sleep_for(chrono::milliseconds(100)); //this characterizes data transfer delay (i.e. CAN or ethernet or w/e medium)
+          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);          
         }
       } else {
         // Manual driving

@@ -5,7 +5,6 @@
 
 using CppAD::AD;
 
-
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
 // when one variable starts and another ends to make our lifes easier.
@@ -37,21 +36,22 @@ class FG_eval {
 
     // The part of the cost based on the reference state.
     for (unsigned int t = 0; t < N; t++) {
-      fg[0] += CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += CppAD::pow(vars[epsi_start + t], 2);
-      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+      AD<double> dv = vars[v_start + t] - ref_v;
+      fg[0] += 2000*CppAD::pow(vars[cte_start + t], 2); //cte differential is in the order of approx -1~1, so this needs to be amplified accordingly
+      fg[0] += 2000*CppAD::pow(vars[epsi_start + t], 2); //epsi differential is in the order of approx -0.3~0.3, so this needs to be amplified accordingly
+      fg[0] += CppAD::pow(dv/2, 2); //velocity differential could be in the order of avg -10~10
     }
 
     // Minimize the use of actuators.
     for (unsigned int t = 0; t < N - 1; t++) {
-      fg[0] += CppAD::pow(vars[delta_start + t], 2);
-      fg[0] += CppAD::pow(vars[a_start + t], 2);
+      fg[0] += CppAD::pow(vars[delta_start + t], 2); //order of -0.15~0.15. multiplying to this would mean high steering angles will be penalized more, so the solver will end up with smaller steering angle
+      fg[0] += CppAD::pow(vars[a_start + t], 2); //order of -1~1. similar logic as above
     }
 
     // Minimize the value gap between sequential actuations.
     for (unsigned int t = 0; t < N - 2; t++) {
-      fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+      fg[0] += CppAD::pow((vars[delta_start + t + 1] - vars[delta_start + t]), 2); //order of 0~0.15 penalize extremely drastic turns
+      fg[0] += 20*CppAD::pow((vars[a_start + t + 1] - vars[a_start + t]), 2); //order of 0~1. penalize sharp decel/accel
     }
 
     //
@@ -92,6 +92,15 @@ class FG_eval {
       // Only consider the actuation at time t.
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
+
+      //for a and delta, which are the two parameters that change most drastically, in optimizing, use the previous
+      //timeframe's a and delta values to account for latency. This basically forces the solver to still figure out the
+      //a and delta that produce the lowest cost, even if the a and delta are those that came from previous timeframe.
+      if (t > 1)
+      {
+        a0 = vars[a_start + t - 2];
+        delta0 = vars[delta_start + t - 2];
+      }
 
 //      AD<double> f0 = coeffs[0] + coeffs[1] * x0; //1st order polynomial
 //      AD<double> psides0 = CppAD::atan(coeffs[1]); //1st order polynomial
@@ -173,14 +182,14 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   // degrees (values in radians).
   // NOTE: Feel free to change this to something else.
   for (unsigned int i = delta_start; i < a_start; i++) {
-    vars_lowerbound[i] = -0.436332;
-    vars_upperbound[i] = 0.436332;
+    vars_lowerbound[i] = -0.436332; //-25*M_PI/180
+    vars_upperbound[i] = 0.436332; //25*M_PI/180
   }
 
   // Acceleration/decceleration upper and lower limits.
   // NOTE: Feel free to change this to something else.
   for (unsigned int i = a_start; i < n_vars; i++) {
-    vars_lowerbound[i] = -1.0;
+    vars_lowerbound[i] = 0;
     vars_upperbound[i] = 1.0;
   }
 
@@ -231,9 +240,10 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   ok &= solution.status == CppAD::ipopt::solve_result<Dvector>::success;
 
   auto cost = solution.obj_value;
-  std::cout << "Cost " << cost << std::endl;
+  //std::cout << "Cost " << cost << std::endl;
 
   vector<double> solved;
+  //std::cout << "deltas: " << solution.x[delta_start] << ", " << solution.x[delta_start+1] << ", " << solution.x[delta_start+2]<< ", " << solution.x[delta_start+3]<< ", " << solution.x[delta_start+4] << std::endl;
   solved.push_back(solution.x[delta_start]);
   solved.push_back(solution.x[a_start]);
   //insert N pairs of x and y points so that in the main function, the green line can be plotted for MPC solved line for each timestep

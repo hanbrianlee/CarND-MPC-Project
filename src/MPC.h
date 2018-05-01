@@ -7,11 +7,17 @@
 using namespace std;
 
 
-// We set the number of timesteps to 25
-// and the timestep evaluation frequency or evaluation
-// period to 0.05.
-const unsigned int N = 25;
-const double dt = 0.05;
+// Both the reference cross track and orientation errors are 0.
+// The reference velocity is set below. The MPC will generate a and delta that can keep the car on track with waypoints
+const double ref_v = 100;
+
+// The timesteps shouldn't be too high. The higher the speed, the less the number (can't look too far ahead)
+//also 3rd order polynomial can't properly characterize if the road up ahead is too curvy.
+const unsigned int N = 10; //number of time-steps.
+
+//take into account 1 cycle of processing latency(approx 15~40ms) and data transfer delay(100ms)
+//h message update rate is very fast (3~4ms) so will be ignored
+const double dt = 0.13; // 130 milliseconds: 100ms + 15~35ms
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -23,24 +29,15 @@ const double dt = 0.05;
 // presented in the classroom matched the previous radius.
 //
 // This is the length from front to CoG that has a similar radius.
-const double Lf = 2.67;
+const double Lf = 2.67; //by making this value larger (imagine a train), the solver will try to use more aggressive steering.
 
-// Both the reference cross track and orientation errors are 0.
-// The reference velocity is set to 40 mph.
-const double ref_v = 40;
+
 
 class MPC {
  public:
   MPC();
 
   virtual ~MPC();
-
-  //declare hyperparameters to be used for MPC
-//  size_t N;
-//  double dt;
-//  double Lf;
-//  double ref_v;
-
 
   // Solve the model given an initial state and polynomial coefficients.
   // Return the first actuatotions.
