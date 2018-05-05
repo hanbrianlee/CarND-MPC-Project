@@ -93,8 +93,8 @@ class FG_eval {
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
-      //for a and delta, which are the two parameters that change most drastically, in optimizing, use the previous
-      //timeframe's a and delta values to account for latency. This basically forces the solver to still figure out the
+      //use the previous timeframe's a and delta values to account for latency.
+      //This basically forces the solver to still figure out the
       //a and delta that produce the lowest cost, even if the a and delta are those that came from previous timeframe.
       if (t > 1)
       {

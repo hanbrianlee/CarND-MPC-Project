@@ -82,9 +82,9 @@ int main() {
     // The 2 signifies a websocket event
 
     //processing time measurement
-    auto begin = std::chrono::high_resolution_clock::now();
-    cout << "h nowtime: " << std::chrono::duration_cast<std::chrono::milliseconds>(begin - nowtime).count() << "ms" << endl;
-    nowtime = begin;
+//    auto begin = std::chrono::high_resolution_clock::now();
+//    cout << "h nowtime: " << std::chrono::duration_cast<std::chrono::milliseconds>(begin - nowtime).count() << "ms" << endl;
+//    nowtime = begin;
 
     string sdata = string(data).substr(0, length);
     //cout << sdata << endl;
@@ -155,15 +155,15 @@ int main() {
           Eigen::VectorXd state(6);
           state << 0, 0, 0, v, cte, epsi; //just dumb simple initialization of state
 
+          //chose not to use this. The problem is that the following assumes the vehicle continues on a straight line for the next dt cycle, which is wrong
           //take into account 1 cycle of processing latency(approx 15~40ms) and data transfer delay(100ms)
           //h message update rate is very fast (3~4ms) so will be ignored
 //          double pred_px = 0.0 + v*cos(0)*dt;
 //          const double pred_py = 0.0 + v*sin(0)*dt;
-//          double pred_psi = 0.0 + ((v / Lf) * -delta * dt); //apply negative to delta, see comments for steer_value below
+//          double pred_psi = 0.0 + ((v / Lf) * -delta * dt);
 //          double pred_v = v + a * dt;
 //          double pred_cte = cte + v * sin(epsi) * dt;
-//          double pred_epsi = epsi + ((v / Lf) * -delta * dt); //apply negative to delta, see comments for steer_value below
-//          state << pred_px, pred_py, pred_psi, pred_v, pred_cte, pred_epsi;
+//          double pred_epsi = epsi + ((v / Lf) * -delta * dt);
 
           //solve using MPC class solve method
           auto vars = mpc.Solve(state,coeffs);
@@ -175,11 +175,7 @@ int main() {
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          /*steering angle has to be negative of the mpc computed value because the way x and y coordinates are set up in this problem
-           normally when x is positive in the "right" direction and y is positive in the "up" direction, the psi angle would be measured
-           positively as it goes counter-clockwise. However, in this problem, x is in the "up" direction and y is positive in the "right
-           direction, making psi angles measuring positively going clockwise. Hence, the steer_value has to be flipped. */
-          msgJson["steering_angle"] = -steer_value;
+          msgJson["steering_angle"] = -steer_value; //negative has to be applied due to simulator (negative value: left turn, positive value: right turn)
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory
@@ -229,7 +225,7 @@ int main() {
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           //std::cout << msg << std::endl;
-          //std::cout << "delta: " << delta << ", cte: " << cte <<", epsi: " << epsi <<", a: " << a << ", steer: " << steer_value << std::endl;
+          std::cout << "delta: " << delta << ", cte: " << cte <<", epsi: " << epsi <<", a: " << a << ", steer: " << steer_value << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
@@ -239,8 +235,8 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          auto end = std::chrono::high_resolution_clock::now();
-          std::cout << "processing time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << "ms" << std::endl;
+//          auto end = std::chrono::high_resolution_clock::now();
+//          std::cout << "processing time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << "ms" << std::endl;
 
           this_thread::sleep_for(chrono::milliseconds(100)); //this characterizes data transfer delay (i.e. CAN or ethernet or w/e medium)
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);          
